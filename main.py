@@ -5,12 +5,12 @@ from sentence_transformers import SentenceTransformer
 import pandas as pd
 
 def load_data():
-    df = pd.read_csv('/Users/jeonghuiyun/PycharmProjects/pythonProject2/distillBERT/converted.csv')
+    df = pd.read_csv('/converted.csv')
     selected_sentences = df['Description'].dropna()  
     return selected_sentences.tolist()
 
 def load_embeddings():
-    return np.load('/Users/jeonghuiyun/PycharmProjects/pythonProject2/distillBERT/corpus_embeddings.npy')
+    return np.load('/corpus_embeddings.npy')
 
 def search_similar_sentences(user_input, corpus, corpus_embeddings):
     embedder = SentenceTransformer('distilroberta-base-paraphrase-v1')
