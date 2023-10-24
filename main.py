@@ -44,7 +44,7 @@ if user_input:
         with st.expander(f"{i}. {row['Organization Name']}"):
             st.markdown(f"- **Description**: {row['Description']}")
             st.markdown(f"- **Last Funding Type**: {row['Last Funding Type']}")
-            st.markdown(f"- **Total Funding Amount**: {row['Total Funding Amount']}")
+            st.markdown(f"- **Total Funding Amount**: USD{row['Total Funding Amount']}")
             st.markdown(f"- **Industries**: {row['Industries']}")
             st.markdown(f"- **Founded Date**: {row['Founded Date']}")
             st.markdown(f"- **Operating Status**: {row['Operating Status']}")
