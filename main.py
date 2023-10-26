@@ -5,12 +5,6 @@ from sentence_transformers import SentenceTransformer
 import pandas as pd
 import matplotlib.pyplot as plt
 import requests
-from dotenv import load_dotenv
-load_dotenv()
-
-import os
-NEWS_API_KEY = os.getenv('NEWS_API_KEY')
-
 
 # For the News Aggregator
 NEWS_API_ENDPOINT = 'https://newsapi.org/v2/top-headlines'
@@ -136,10 +130,11 @@ def company_finder(df, corpus_embeddings, user_input):
 def fetch_news(country, category=None):
     params = {
         'country': country,
-        'apiKey': NEWS_API_KEY
+        'apiKey': st.secrets["NEWS_API_KEY"]  # Using the API key from secrets.toml
     }
     if category:
         params['category'] = category
+        
     response = requests.get(NEWS_API_ENDPOINT, params=params)
     return response.json()
 
