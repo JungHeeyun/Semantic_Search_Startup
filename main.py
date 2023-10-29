@@ -18,57 +18,74 @@ def load_data():
 def load_embeddings():
     return np.load('corpus_embeddings.npy')
 
-def search_similar_sentences(user_input, df, corpus_embeddings):
+def search_similar_sentences(user_input, df, corpus_embeddings, k=10000):
     embedder = SentenceTransformer('distilroberta-base-paraphrase-v1')
     user_embedding = embedder.encode([user_input])
     
-    corpus = df['Description'].tolist()
-    
-    dimension = len(corpus_embeddings[0])  
+    dimension = len(corpus_embeddings[0])
     index = faiss.IndexFlatL2(dimension)
-    index.add(corpus_embeddings.astype('float32'))  
+    index.add(corpus_embeddings.astype('float32'))
     
-    _, top_indices = index.search(np.array(user_embedding).astype('float32'), k=5)
+    _, top_indices = index.search(np.array(user_embedding).astype('float32'), k=k)
     
-    # Getting other columns as well for the top similar sentences
     similar_rows = [df.iloc[idx] for idx in top_indices[0]]
     
     return similar_rows
 
-def plot_company_data(company_row):
-    plt.figure(figsize=(10, 5))
+def plot_company_data(company_row, threshold=0.99):
     
     # Convert columns to datetime and numeric, considering '—' as NaN
     df['Last Funding Date'] = pd.to_datetime(df['Last Funding Date'], errors='coerce')
     df['Total Funding Amount'] = pd.to_numeric(df['Total Funding Amount'], errors='coerce')
-    # Check for '—' in the selected company's data
-    if company_row['Last Funding Date'] == '—' or company_row['Total Funding Amount'] == '—':
-        st.warning('Missing data: Unable to generate the complete plot due to missing Last Funding Date or Total Funding Amount.')
-        return
     
     # Drop rows where either 'Last Funding Date' or 'Total Funding Amount' is NaN
     cleaned_df = df.dropna(subset=['Last Funding Date', 'Total Funding Amount'])
     
-    # Check for '—' in the selected company's data
-    if pd.isna(company_row['Last Funding Date']) or pd.isna(company_row['Total Funding Amount']):
-        st.warning('Missing data: Unable to generate the complete plot due to missing Last Funding Date or Total Funding Amount.')
-        return
+    # Removing outliers, keeping only companies below the certain percentile of Total Funding Amount
+    threshold_value = cleaned_df['Total Funding Amount'].quantile(threshold)
+    cleaned_df = cleaned_df[cleaned_df['Total Funding Amount'] < threshold_value]
     
+    # Plot all companies
+    plt.figure(figsize=(10, 5))
     plt.scatter(cleaned_df['Last Funding Date'], cleaned_df['Total Funding Amount'], 
-                label='Other Companies', alpha=0.5)
+                label='All Companies', alpha=0.5)
     
-    # Highlight the selected company
-    plt.scatter(pd.to_datetime(company_row['Last Funding Date']), 
-                pd.to_numeric(company_row['Total Funding Amount']), 
-                color='red', label='Selected Company')
+    # Highlighting the selected company in the basic graph
+    selected_company_funding = pd.to_numeric(company_row['Total Funding Amount'], errors='coerce')
+    if selected_company_funding < threshold_value:
+        plt.scatter(pd.to_datetime(company_row['Last Funding Date']), selected_company_funding, 
+                    color='red', label='Selected Company')
     
-    plt.title('Last Funding Date vs Total Funding Amount')
+    plt.title('All Companies: Last Funding Date vs Total Funding Amount')
     plt.xlabel('Last Funding Date')
     plt.ylabel('Total Funding Amount')
     plt.xticks(rotation=45)
     plt.legend()
-    
     st.pyplot(plt)
+    
+    # Extract industries from the selected company
+    industries_to_highlight = company_row['Industries'].split(', ')
+    
+    for industry in industries_to_highlight:
+        plt.figure(figsize=(10, 5))
+        
+        # Highlighting the companies in the same industry as the selected company
+        industry_df = cleaned_df[cleaned_df['Industries'].str.contains(industry, na=False, regex=False)]
+        plt.scatter(industry_df['Last Funding Date'], industry_df['Total Funding Amount'], 
+                    color='green', label=f'Companies in {industry}', alpha=0.5)
+        
+        # Highlighting the selected company
+        selected_company_funding = pd.to_numeric(company_row['Total Funding Amount'], errors='coerce')
+        if selected_company_funding < threshold_value:
+            plt.scatter(pd.to_datetime(company_row['Last Funding Date']), selected_company_funding, 
+                        color='red', label='Selected Company')
+        
+        plt.title(f'{industry}: Last Funding Date vs Total Funding Amount')
+        plt.xlabel('Last Funding Date')
+        plt.ylabel('Total Funding Amount')
+        plt.xticks(rotation=45)
+        plt.legend()
+        st.pyplot(plt)
 
 def plot_user_and_company_data(user_input, df):
     plt.figure(figsize=(10, 5))
@@ -98,13 +115,30 @@ def plot_user_and_company_data(user_input, df):
     
     st.pyplot(plt)
 
-def company_finder(df, corpus_embeddings, user_input):
-
+def company_finder(df, corpus_embeddings, user_input, country_filter=None, industry_filter=None, 
+                   last_funding_type=None, funding_status=None):
+    
     if user_input:
         similar_rows = search_similar_sentences(user_input, df, corpus_embeddings)
+        
+        # Applying filters
+        if country_filter and 'All' not in country_filter:
+            similar_rows = [row for row in similar_rows if any(country.lower() in row['Headquarters Location'].lower() for country in country_filter)]
+            
+        if industry_filter and 'All' not in industry_filter:
+            similar_rows = [row for row in similar_rows if any(industry.lower() in str(row['Industries']).lower() for industry in industry_filter)]
+            
+        if last_funding_type and 'All' not in last_funding_type:
+            similar_rows = [row for row in similar_rows if row['Last Funding Type'] in last_funding_type]
+            
+        if funding_status and 'All' not in funding_status:
+            similar_rows = [row for row in similar_rows if row['Funding Status'] in funding_status]
+        
+        # Display only top 5 companies after applying the country and industry filters
+        top_5_rows = similar_rows[:5]
+        
         st.write("## Top 5 similar companies:")
-        for i, row in enumerate(similar_rows, 1):
-            # Using an expander for each company
+        for i, row in enumerate(top_5_rows, 1):
             with st.expander(f"{i}. {row['Organization Name']}"):
                 st.markdown(f"- **Description**: {row['Description']}")
                 st.markdown(f"- **Last Funding Type**: {row['Last Funding Type']}")
@@ -130,11 +164,10 @@ def company_finder(df, corpus_embeddings, user_input):
 def fetch_news(country, category=None):
     params = {
         'country': country,
-        'apiKey': st.secrets["NEWS_API_KEY"]  # Using the API key from secrets.toml
+        'apiKey': NEWS_API_KEY
     }
     if category:
         params['category'] = category
-        
     response = requests.get(NEWS_API_ENDPOINT, params=params)
     return response.json()
 
@@ -148,8 +181,35 @@ selected_tab = st.sidebar.selectbox("Choose a tab", tabs)
 
 if selected_tab == 'Company Finder':
     st.title('Company Finder')
+    
     user_input = st.text_input("Describe the characteristic of company: ")
-    company_finder(df, corpus_embeddings, user_input)
+    
+    # Country filter
+    country_options = ['All', 'China', 'Hong Kong', 'United States', 'Singapore']
+    selected_country = st.multiselect('Select a country', country_options)
+    
+    # Industry filter
+    industry_options = [
+        'Software', 'Information Technology', 'Health Care', 'Financial Services', 
+        'Artificial Intelligence', 'E-Commerce', 'Manufacturing', 'Internet', 
+        'Biotechnology', 'SaaS', 'Medical', 'FinTech', 'Consulting', 'Finance', 
+        'Machine Learning', 'Analytics', 'Blockchain', 'Education', 'Mobile', 
+        'Advertising', 'Food and Beverage', 'Apps', 'Marketing', 'Electronics', 
+        'Big Data', 'Enterprise Software', 'Retail', 'Others'
+    ]
+    selected_industry = st.multiselect('Select an industry', industry_options)
+    
+    # Last Funding Type filter
+    last_funding_type_options = ['All', 'Series A', 'Seed', 'Series B', 'Series C', 'Pre-Seed']
+    selected_last_funding_type = st.multiselect('Select a last funding type', last_funding_type_options)
+    
+    # Funding Status filter
+    funding_status_options = ['All', 'Early Stage Venture', 'Seed', 'Late Stage Venture', 'M&A', 'IPO', 'Private Equity']
+    selected_funding_status = st.multiselect('Select a funding status', funding_status_options)
+    
+    company_finder(df, corpus_embeddings, user_input, country_filter=selected_country, 
+                   industry_filter=selected_industry, last_funding_type=selected_last_funding_type, 
+                   funding_status=selected_funding_status)
 
 elif selected_tab == 'Data Analysis':
     st.title('Data Analysis')
